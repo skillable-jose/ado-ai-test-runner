@@ -1,6 +1,7 @@
 // src/adoClient.js
 const axios = require('axios');
 const { ConfidentialClientApplication } = require('@azure/msal-node');
+const { debug } = require('./log');
 
 class ADOClient {
   constructor({ org, project, authMode, pat, tenantId, clientId, clientSecret }) {
@@ -25,9 +26,14 @@ class ADOClient {
 
   async getHeaders() {
     if (this.authMode === 'entra') {
-      const { accessToken } = await this.msal.acquireTokenByClientCredential({
-        scopes: ['499b84ac-1321-427f-aa17-267ca6975798/.default']
-      });
+      let accessToken;
+      try {
+        ({ accessToken } = await this.msal.acquireTokenByClientCredential({
+          scopes: ['499b84ac-1321-427f-aa17-267ca6975798/.default']
+        }));
+      } catch (err) {
+        throw new Error('Entra token acquisition failed: ' + err.message);
+      }
       return { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' };
     }
     return {
@@ -41,20 +47,34 @@ class ADOClient {
     return this.getHeaders();
   }
 
+  // Shared request path — every ADO call goes through here so failures
+  // always carry method/URL/status/body instead of a bare axios message.
+  async _request(method, url, data) {
+    debug(method.toUpperCase() + ' ' + url);
+    try {
+      const res = await axios({ method, url, data, headers: await this.getHeaders() });
+      return res.data;
+    } catch (err) {
+      const status = err.response ? err.response.status : '(no response)';
+      const body   = err.response ? JSON.stringify(err.response.data).slice(0, 500) : err.message;
+      throw new Error('ADO request failed: ' + method.toUpperCase() + ' ' + url + ' -> ' + status + ' ' + body);
+    }
+  }
+
   async get(path) {
-    return (await axios.get(this.base + path, { headers: await this.getHeaders() })).data;
+    return this._request('get', this.base + path);
   }
 
   async getOrg(path) {
-    return (await axios.get(this.orgBase + path, { headers: await this.getHeaders() })).data;
+    return this._request('get', this.orgBase + path);
   }
 
   async post(path, body) {
-    return (await axios.post(this.base + path, body, { headers: await this.getHeaders() })).data;
+    return this._request('post', this.base + path, body);
   }
 
   async patch(path, body) {
-    return (await axios.patch(this.base + path, body, { headers: await this.getHeaders() })).data;
+    return this._request('patch', this.base + path, body);
   }
 
   // ── Test Plan API ──────────────────────────────────────────────────────────

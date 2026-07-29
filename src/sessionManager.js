@@ -3,6 +3,7 @@
 // This is the key performance win — 65 browser tests share one login.
 
 const puppeteer = require('puppeteer');
+const { debug } = require('./log');
 
 class SessionManager {
   constructor({ studioUrl, authMode, username, password }) {
@@ -62,7 +63,12 @@ class SessionManager {
     }
 
     await this.page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {});
-    console.log('  Logged in. Current URL: ' + this.page.url());
+
+    const finalUrl = this.page.url();
+    if (finalUrl.includes('login') || finalUrl.includes('signin')) {
+      console.warn('  Warning: still on a login page after submit — login likely failed. URL: ' + finalUrl);
+    }
+    console.log('  Logged in. Current URL: ' + finalUrl);
   }
 
   async _loginWithCredentials() {
@@ -85,14 +91,18 @@ class SessionManager {
     ];
 
     // Fill email / username
+    let emailFilled = false;
     for (const sel of emailSelectors) {
       const el = await this.page.$(sel);
       if (el) {
+        debug('Email field matched selector: ' + sel);
         await el.click({ clickCount: 3 });
         await el.type(this.username);
+        emailFilled = true;
         break;
       }
     }
+    if (!emailFilled) console.warn('  Warning: no email/username field matched on ' + this.page.url());
 
     // Some flows (e.g. Microsoft) require clicking Next before showing password
     const nextButton = await this.page.$('input[type="submit"]') ||
@@ -103,14 +113,18 @@ class SessionManager {
     }
 
     // Fill password
+    let passwordFilled = false;
     for (const sel of passwordSelectors) {
       const el = await this.page.$(sel);
       if (el) {
+        debug('Password field matched selector: ' + sel);
         await el.click({ clickCount: 3 });
         await el.type(this.password);
+        passwordFilled = true;
         break;
       }
     }
+    if (!passwordFilled) console.warn('  Warning: no password field matched on ' + this.page.url());
 
     // Submit
     await this.page.keyboard.press('Enter');

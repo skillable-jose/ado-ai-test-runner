@@ -7,6 +7,7 @@
 //   5. Repeat until Claude says done / fail, or MAX_STEPS is reached
 
 const Anthropic = require('@anthropic-ai/sdk');
+const { debug } = require('./log');
 
 const MAX_STEPS = 25;       // Safety guard — prevents infinite loops
 const ACTION_TIMEOUT = 8000; // ms to wait for elements / navigation
@@ -127,6 +128,7 @@ class PuppeteerExecutor {
         } catch (_) {}
 
         if (!el) {
+          debug('CSS selector not found, falling back to text match: "' + action.target + '"');
           // Try matching by visible text (button text, link text, label)
           el = await page.evaluateHandle((text) => {
             const all = Array.from(document.querySelectorAll('button, a, [role="button"], input[type="submit"]'));
@@ -222,10 +224,18 @@ class PuppeteerExecutor {
         });
 
         const raw = content[0].text.replace(/```[\s\S]*?```/g, '').trim();
-        decision  = JSON.parse(raw);
+        try {
+          decision = JSON.parse(raw);
+        } catch (err) {
+          debug('Claude returned non-JSON at step ' + loop + ' for "' + title + '":', raw);
+          throw err;
+        }
       } catch (err) {
         return { outcome: 'Failed', reason: 'Claude decision error: ' + err.message, ms: Date.now() - t0 };
       }
+
+      debug('[' + loop + '] ' + decision.action + (decision.target ? ' -> ' + decision.target : '') +
+            (decision.value ? ' (' + decision.value + ')' : '') + ' | ' + currentUrl + ' | ' + (decision.reason || ''));
 
       // Terminal states
       if (decision.action === 'done') {
@@ -248,6 +258,7 @@ class PuppeteerExecutor {
       try {
         await this._executeAction(page, decision);
       } catch (err) {
+        debug('Action failed at step ' + loop + ', current URL: ' + page.url());
         return {
           outcome: 'Failed',
           reason:  'Action "' + decision.action + '" on "' + decision.target + '" failed: ' + err.message,
@@ -256,6 +267,7 @@ class PuppeteerExecutor {
       }
     }
 
+    debug('Max steps reached for "' + title + '", history:', JSON.stringify(history));
     return {
       outcome: 'Failed',
       reason:  'Reached maximum of ' + MAX_STEPS + ' steps without completing the test',

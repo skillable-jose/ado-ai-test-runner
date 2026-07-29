@@ -69,11 +69,18 @@ async function main() {
   // ── Classify all tests upfront so we know if browser is needed ────────────
 
   const classified = [];
-  for (const point of points) {
-    const tc       = await ado.getTestCaseDetails(point.testCase.id);
+  for (const [i, point] of points.entries()) {
+    if (!point.testCaseReference) {
+      console.error('Point ' + point.id + ' (index ' + i + ') has no testCaseReference:', JSON.stringify(point));
+      throw new Error('Test point ' + point.id + ' is missing testCaseReference');
+    }
+
+    process.stdout.write('Classifying ' + (i + 1) + '/' + points.length + ': test case ' + point.testCaseReference.id + '\r');
+    const tc       = await ado.getTestCaseDetails(point.testCaseReference.id);
     const category = classifyTestCase(tc);
     classified.push({ point, tc, category });
   }
+  process.stdout.write('\n');
 
   const httpCount      = classified.filter(c => c.category === 'http').length;
   const puppeteerCount = classified.filter(c => c.category === 'puppeteer').length;

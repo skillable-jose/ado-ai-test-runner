@@ -5,6 +5,7 @@
 
 const axios  = require('axios');
 const Anthropic = require('@anthropic-ai/sdk');
+const { debug } = require('./log');
 
 class HttpExecutor {
   constructor() {
@@ -64,6 +65,7 @@ class HttpExecutor {
       const { method, url } = this._extractCall(steps);
 
       if (!url) {
+        debug('No URL extracted from steps for "' + title + '":', JSON.stringify(steps));
         return {
           outcome: 'Blocked',
           reason:  'Could not extract an API URL from the test steps',
@@ -72,6 +74,7 @@ class HttpExecutor {
       }
 
       const body = ['POST', 'PATCH', 'PUT'].includes(method) ? this._extractBody(steps) : undefined;
+      debug(method + ' ' + url + (body ? ' body=' + JSON.stringify(body) : ''));
 
       // Make the HTTP call — never throw on non-2xx
       let response;
@@ -84,6 +87,7 @@ class HttpExecutor {
           validateStatus: () => true,
           timeout:        15000
         });
+        debug('Response ' + response.status + ' for ' + url);
       } catch (err) {
         return { outcome: 'Failed', reason: 'HTTP request failed: ' + err.message, ms: Date.now() - t0 };
       }
@@ -121,8 +125,14 @@ class HttpExecutor {
         }]
       });
 
-      const raw    = content[0].text.replace(/```[\s\S]*?```/g, '').trim();
-      const result = JSON.parse(raw);
+      const raw = content[0].text.replace(/```[\s\S]*?```/g, '').trim();
+      let result;
+      try {
+        result = JSON.parse(raw);
+      } catch (err) {
+        debug('Claude returned non-JSON for "' + title + '":', raw);
+        throw err;
+      }
       return { ...result, ms: Date.now() - t0 };
 
     } catch (err) {
