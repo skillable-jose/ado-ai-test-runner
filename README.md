@@ -36,6 +36,12 @@ cp .env.example .env
 node index.js "Sprint 42" QA
 ```
 
+To run just one test case instead of the whole sprint, pass its ADO work item ID as a fourth argument:
+
+```bash
+node index.js "Sprint 42" QA 12345
+```
+
 ## GitHub setup
 
 ### Create the repo
@@ -69,7 +75,7 @@ Add each value from `.env.example`:
 1. Go to **Actions** tab
 2. Click **ADO AI Test Runner** in the left sidebar
 3. Click **Run workflow**
-4. Enter sprint name and select environment
+4. Enter sprint name, optionally a work item ID to run just that test case, and select environment
 5. Click **Run workflow**
 
 That's it — no pipeline access needed.
@@ -97,10 +103,13 @@ When you get ADO Project Settings access, you can make this run automatically af
      "event_type": "run-tests",
      "client_payload": {
        "sprint_name": "Sprint 42",
+       "work_item_id": "",
        "environment": "QA"
      }
    }
    ```
+
+   `work_item_id` is optional — leave it blank (or omit it) to run the whole sprint, or set it to an ADO work item ID to run just that test case.
 
 The GitHub PAT needs `repo` scope. Generate it at **GitHub → Settings → Developer settings → Personal access tokens**.
 

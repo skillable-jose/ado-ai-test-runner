@@ -11,20 +11,22 @@ const PuppeteerExecutor  = require('./src/puppeteerExecutor');
 const { classifyTestCase } = require('./src/classifier');
 
 async function main() {
-  const sprint = process.env.SPRINT_NAME || process.argv[2];
-  const env    = process.env.TARGET_ENV   || process.argv[3] || 'QA';
+  const sprint     = process.env.SPRINT_NAME || process.argv[2];
+  const env        = process.env.TARGET_ENV   || process.argv[3] || 'QA';
+  const workItemId = process.env.WORK_ITEM_ID  || process.argv[4] || null;
 
   if (!sprint) {
     console.error('Error: SPRINT_NAME is required.\n');
-    console.error('Usage: node index.js "Sprint 42" QA');
-    console.error('   or: SPRINT_NAME="Sprint 42" TARGET_ENV=QA node index.js');
+    console.error('Usage: node index.js "Sprint 42" QA [workItemId]');
+    console.error('   or: SPRINT_NAME="Sprint 42" TARGET_ENV=QA WORK_ITEM_ID=12345 node index.js');
     process.exit(1);
   }
 
   console.log('\n====================================================');
   console.log('  ADO AI Test Runner');
-  console.log('  Sprint : ' + sprint);
-  console.log('  ENV    : ' + env);
+  console.log('  Sprint    : ' + sprint);
+  console.log('  ENV       : ' + env);
+  console.log('  Work Item : ' + (workItemId || 'ALL (full sprint)'));
   console.log('====================================================\n');
 
   // ── ADO client ─────────────────────────────────────────────────────────────
@@ -53,13 +55,47 @@ async function main() {
   // ── Fetch test plan ────────────────────────────────────────────────────────
 
   console.log('Fetching test plan...');
-  const plan   = await ado.getTestPlanForSprint(sprint);
-  const suites = await ado.getTestSuites(plan.id);
-  const points = (await Promise.all(suites.map(s => ado.getTestPoints(plan.id, s.id)))).flat();
+  let plan   = await ado.getTestPlanForSprint(sprint);
+  let suites = await ado.getTestSuites(plan.id);
+  let points = (await Promise.all(suites.map(s => ado.getTestPoints(plan.id, s.id)))).flat();
 
   console.log('Plan   : "' + plan.name + '" (ID ' + plan.id + ')');
   console.log('Suites : ' + suites.length);
   console.log('Points : ' + points.length + '\n');
+
+  // ── Optionally narrow by work item ID ───────────────────────────────────────
+  // workItemId may refer to: a Test Plan (run it directly), a Test Case
+  // (run just that one), or a Story/Bug (run whatever test cases are linked
+  // to it via "Tested By").
+
+  if (workItemId) {
+    const planById = await ado.getTestPlanById(workItemId).catch(() => null);
+
+    if (planById) {
+      plan   = planById;
+      suites = await ado.getTestSuites(plan.id);
+      points = (await Promise.all(suites.map(s => ado.getTestPoints(plan.id, s.id)))).flat();
+      console.log('Using test plan ' + workItemId + ' directly: "' + plan.name + '" (' + points.length + ' points)\n');
+
+    } else {
+      const wi   = await ado.getWorkItem(workItemId);
+      const type = (wi.fields || {})['System.WorkItemType'] || 'work item';
+
+      const testCaseIds = type === 'Test Case'
+        ? [String(workItemId)]
+        : await ado.getLinkedTestCaseIds(workItemId);
+
+      if (testCaseIds.length === 0) {
+        throw new Error('Work item ' + workItemId + ' (' + type + ') has no linked test cases (no "Tested By" relation).');
+      }
+
+      points = points.filter(p => p.testCaseReference && testCaseIds.includes(String(p.testCaseReference.id)));
+      if (points.length === 0) {
+        throw new Error('No test case linked to work item ' + workItemId + ' (' + type + ') is part of the "' + plan.name + '" test plan for sprint "' + sprint + '".');
+      }
+      console.log('Filtered to work item ' + workItemId + ' (' + type + '): ' + points.length + ' test point(s)\n');
+    }
+  }
 
   // ── Create test run in ADO ─────────────────────────────────────────────────
 

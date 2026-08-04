@@ -86,6 +86,10 @@ class ADOClient {
     ) || value[value.length - 1];
   }
 
+  async getTestPlanById(planId) {
+    return this.get('/_apis/testplan/plans/' + planId + '?api-version=7.0');
+  }
+
   async getTestSuites(planId) {
     return (await this.get('/_apis/testplan/plans/' + planId + '/suites?api-version=7.0')).value;
   }
@@ -96,8 +100,23 @@ class ADOClient {
     )).value;
   }
 
-  async getTestCaseDetails(id) {
+  // ── Work Item API ──────────────────────────────────────────────────────────
+
+  async getWorkItem(id) {
     return this.getOrg('/' + this.project + '/_apis/wit/workitems/' + id + '?$expand=all&api-version=7.0');
+  }
+
+  async getTestCaseDetails(id) {
+    return this.getWorkItem(id);
+  }
+
+  // For a Story/Bug/requirement work item, returns the IDs of test cases
+  // linked to it via a "Tested By" relation.
+  async getLinkedTestCaseIds(workItemId) {
+    const wi = await this.getWorkItem(workItemId);
+    return (wi.relations || [])
+      .filter(r => r.rel === 'Microsoft.VSTS.Common.TestedBy-Forward')
+      .map(r => r.url.split('/').pop());
   }
 
   // ── Test Run API ───────────────────────────────────────────────────────────
