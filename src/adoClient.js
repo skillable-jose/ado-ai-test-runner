@@ -3,6 +3,14 @@ const axios = require('axios');
 const { ConfidentialClientApplication } = require('@azure/msal-node');
 const { debug } = require('./log');
 
+const MAX_RETRIES = 3;
+const RETRY_BASE_DELAY_MS = 500;
+const RETRYABLE_STATUS = new Set([429, 502, 503, 504]);
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 class ADOClient {
   constructor({ org, project, authMode, pat, tenantId, clientId, clientSecret }) {
     this.org      = org;
@@ -49,16 +57,32 @@ class ADOClient {
 
   // Shared request path — every ADO call goes through here so failures
   // always carry method/URL/status/body instead of a bare axios message.
+  // Transient failures (no response at all, or 429/502/503/504) are
+  // retried with exponential backoff before giving up.
   async _request(method, url, data) {
     debug(method.toUpperCase() + ' ' + url);
-    try {
-      const res = await axios({ method, url, data, headers: await this.getHeaders() });
-      return res.data;
-    } catch (err) {
-      const status = err.response ? err.response.status : '(no response)';
-      const body   = err.response ? JSON.stringify(err.response.data).slice(0, 500) : err.message;
-      throw new Error('ADO request failed: ' + method.toUpperCase() + ' ' + url + ' -> ' + status + ' ' + body);
+    let lastErr;
+
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const res = await axios({ method, url, data, headers: await this.getHeaders() });
+        return res.data;
+      } catch (err) {
+        lastErr = err;
+        const status    = err.response ? err.response.status : null;
+        const retryable = !err.response || RETRYABLE_STATUS.has(status);
+
+        if (!retryable || attempt === MAX_RETRIES) break;
+
+        const delay = RETRY_BASE_DELAY_MS * 2 ** attempt;
+        debug('Retrying after error (attempt ' + (attempt + 1) + '/' + MAX_RETRIES + ', waiting ' + delay + 'ms): ' + err.message);
+        await sleep(delay);
+      }
     }
+
+    const status = lastErr.response ? lastErr.response.status : '(no response)';
+    const body   = lastErr.response ? JSON.stringify(lastErr.response.data).slice(0, 500) : lastErr.message;
+    throw new Error('ADO request failed: ' + method.toUpperCase() + ' ' + url + ' -> ' + status + ' ' + body);
   }
 
   async get(path) {

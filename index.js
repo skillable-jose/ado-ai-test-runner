@@ -9,6 +9,9 @@ const SessionManager     = require('./src/sessionManager');
 const HttpExecutor       = require('./src/httpExecutor');
 const PuppeteerExecutor  = require('./src/puppeteerExecutor');
 const { classifyTestCase } = require('./src/classifier');
+const { mapLimit }       = require('./src/concurrency');
+
+const SUITE_FETCH_CONCURRENCY = 8;
 
 async function main() {
   const sprint     = process.env.SPRINT_NAME || process.argv[2];
@@ -57,7 +60,7 @@ async function main() {
   console.log('Fetching test plan...');
   let plan   = await ado.getTestPlanForSprint(sprint);
   let suites = await ado.getTestSuites(plan.id);
-  let points = (await Promise.all(suites.map(s => ado.getTestPoints(plan.id, s.id)))).flat();
+  let points = (await mapLimit(suites, SUITE_FETCH_CONCURRENCY, s => ado.getTestPoints(plan.id, s.id))).flat();
 
   console.log('Plan   : "' + plan.name + '" (ID ' + plan.id + ')');
   console.log('Suites : ' + suites.length);
@@ -74,7 +77,7 @@ async function main() {
     if (planById) {
       plan   = planById;
       suites = await ado.getTestSuites(plan.id);
-      points = (await Promise.all(suites.map(s => ado.getTestPoints(plan.id, s.id)))).flat();
+      points = (await mapLimit(suites, SUITE_FETCH_CONCURRENCY, s => ado.getTestPoints(plan.id, s.id))).flat();
       console.log('Using test plan ' + workItemId + ' directly: "' + plan.name + '" (' + points.length + ' points)\n');
 
     } else {
@@ -101,7 +104,7 @@ async function main() {
         for (const candidate of allPlans) {
           if (candidate.id === plan.id) continue;
           const candidateSuites = await ado.getTestSuites(candidate.id);
-          const candidatePoints = (await Promise.all(candidateSuites.map(s => ado.getTestPoints(candidate.id, s.id)))).flat();
+          const candidatePoints = (await mapLimit(candidateSuites, SUITE_FETCH_CONCURRENCY, s => ado.getTestPoints(candidate.id, s.id))).flat();
           const found = candidatePoints.filter(p => p.testCaseReference && testCaseIds.includes(String(p.testCaseReference.id)));
 
           if (found.length > 0) {
