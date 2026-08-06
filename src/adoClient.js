@@ -79,11 +79,15 @@ class ADOClient {
 
   // ── Test Plan API ──────────────────────────────────────────────────────────
 
+  async getAllTestPlans() {
+    return (await this.get('/_apis/testplan/plans?api-version=7.0')).value;
+  }
+
   async getTestPlanForSprint(sprint) {
-    const { value } = await this.get('/_apis/testplan/plans?api-version=7.0');
-    return value.find(
+    const plans = await this.getAllTestPlans();
+    return plans.find(
       p => p.iteration && p.iteration.toLowerCase().includes(sprint.toLowerCase())
-    ) || value[value.length - 1];
+    ) || plans[plans.length - 1];
   }
 
   async getTestPlanById(planId) {

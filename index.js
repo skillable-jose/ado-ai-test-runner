@@ -89,11 +89,37 @@ async function main() {
         throw new Error('Work item ' + workItemId + ' (' + type + ') has no linked test cases (no "Tested By" relation).');
       }
 
-      points = points.filter(p => p.testCaseReference && testCaseIds.includes(String(p.testCaseReference.id)));
-      if (points.length === 0) {
-        throw new Error('No test case linked to work item ' + workItemId + ' (' + type + ') is part of the "' + plan.name + '" test plan for sprint "' + sprint + '".');
+      let matched = points.filter(p => p.testCaseReference && testCaseIds.includes(String(p.testCaseReference.id)));
+
+      // The sprint-matched plan doesn't have to be the one these test cases
+      // live in (a sprint can have several test plans) — fall back to
+      // scanning every test plan for them.
+      if (matched.length === 0) {
+        console.log('Not found in "' + plan.name + '" — searching all test plans...');
+        const allPlans = await ado.getAllTestPlans();
+
+        for (const candidate of allPlans) {
+          if (candidate.id === plan.id) continue;
+          const candidateSuites = await ado.getTestSuites(candidate.id);
+          const candidatePoints = (await Promise.all(candidateSuites.map(s => ado.getTestPoints(candidate.id, s.id)))).flat();
+          const found = candidatePoints.filter(p => p.testCaseReference && testCaseIds.includes(String(p.testCaseReference.id)));
+
+          if (found.length > 0) {
+            plan    = candidate;
+            suites  = candidateSuites;
+            points  = candidatePoints;
+            matched = found;
+            break;
+          }
+        }
       }
-      console.log('Filtered to work item ' + workItemId + ' (' + type + '): ' + points.length + ' test point(s)\n');
+
+      if (matched.length === 0) {
+        throw new Error('No test case linked to work item ' + workItemId + ' (' + type + ') was found in any test plan.');
+      }
+
+      points = matched;
+      console.log('Filtered to work item ' + workItemId + ' (' + type + '): using plan "' + plan.name + '" (ID ' + plan.id + '), ' + points.length + ' test point(s)\n');
     }
   }
 
